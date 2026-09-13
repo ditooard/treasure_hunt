@@ -39,8 +39,9 @@
     let ctx = null;
     let master = null;
     let musicGain = null;
-    let musicTimer = null;
-    let step = 0;
+    let musicBuffer = null;
+    let musicSource = null;
+    let musicLoading = false;
 
     const prefs = {
       sound: localStorage.getItem('th_sound') !== '0',
@@ -61,7 +62,7 @@
         master.gain.value = 0.6;
         master.connect(ctx.destination);
         musicGain = ctx.createGain();
-        musicGain.gain.value = prefs.music ? 0.08 : 0;
+        musicGain.gain.value = prefs.music ? 0.16 : 0;
         musicGain.connect(master);
       }
       if (ctx.state === 'suspended') ctx.resume();
@@ -110,23 +111,37 @@
       [392, 523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => tone(f, 0.3, 'triangle', 0.22, i * 0.11));
     }
 
-    const MELODY = [261.63, 329.63, 392, 440, 392, 329.63, 293.66, 261.63];
+    function loadMusic() {
+      if (musicBuffer || musicLoading || !ctx) return;
+      musicLoading = true;
+      fetch('assets/music/bg-loop.m4a')
+        .then((r) => r.arrayBuffer())
+        .then((buf) => ctx.decodeAudioData(buf))
+        .then((decoded) => {
+          musicBuffer = decoded;
+          musicLoading = false;
+          if (prefs.music) startMusic();
+        })
+        .catch(() => { musicLoading = false; });
+    }
 
     function startMusic() {
-      if (!ctx || musicTimer || !prefs.music) return;
-      musicTimer = setInterval(() => {
-        if (!ctx || !prefs.music) return;
-        const f = MELODY[step % MELODY.length];
-        tone(f, 0.5, 'sine', 0.1, 0, musicGain);
-        if (step % 4 === 0) tone(f / 2, 0.9, 'sine', 0.08, 0, musicGain);
-        step++;
-      }, 560);
+      if (!ctx || !prefs.music || musicSource) return;
+      if (!musicBuffer) {
+        loadMusic();
+        return;
+      }
+      musicSource = ctx.createBufferSource();
+      musicSource.buffer = musicBuffer;
+      musicSource.loop = true;
+      musicSource.connect(musicGain);
+      musicSource.start();
     }
 
     function stopMusic() {
-      if (musicTimer) {
-        clearInterval(musicTimer);
-        musicTimer = null;
+      if (musicSource) {
+        try { musicSource.stop(); } catch (e) { /* ignore */ }
+        musicSource = null;
       }
     }
 
@@ -145,7 +160,7 @@
     function setMusic(on) {
       prefs.music = on;
       persist();
-      if (ctx && musicGain) musicGain.gain.setTargetAtTime(on ? 0.08 : 0, ctx.currentTime, 0.05);
+      if (ctx && musicGain) musicGain.gain.setTargetAtTime(on ? 0.16 : 0, ctx.currentTime, 0.05);
       if (on) startMusic();
       else stopMusic();
       syncUI();
@@ -163,7 +178,7 @@
     function duck(on) {
       if (!ctx || !master || !musicGain) return;
       master.gain.setTargetAtTime(on ? 0.28 : 0.6, ctx.currentTime, 0.08);
-      const vol = prefs.music ? (on ? 0.012 : 0.08) : 0;
+      const vol = prefs.music ? (on ? 0.035 : 0.16) : 0;
       musicGain.gain.setTargetAtTime(vol, ctx.currentTime, 0.08);
     }
 
